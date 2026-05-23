@@ -1,125 +1,177 @@
 # pi-ez-chat-handoff
 
-Hand off your current pi session to a pi-chat channel so you can continue working from Discord/Telegram.
+`pi-ez-chat-handoff` lets you take the pi session you are using locally and continue it from a `pi-chat` channel such as Discord or Telegram.
 
-## What's the problem?
+Use it when you have already started useful work in a local pi session and decide: “I want this exact project, skills, and session context available from chat.”
 
-`/chat-connect` in pi-chat already does almost everything you want — attaches the current pi session to a channel, spins up a fresh Gondolin VM with `/workspace` mounted from the channel's workspace dir, pipes messages back and forth.
+## What you get
 
-What's missing: the channel's workspace dir is empty (no project files), and the VM doesn't have your host's `~/.pi/agent/skills/`. So even though your session history is there, the agent can't operate on your repo.
-
-This extension fixes that with one command.
-
-## Usage
-
-```
-/chat-ez-handoff [<accountId/channelKey>] [<project-dir>] [flags]
-```
-
-Defaults: channel selected interactively if omitted, project dir is current cwd, skills copied automatically.
-
-Flags:
-- `--project=<dir>` — project to mount (default: current cwd)
-- `--channel=<id>` — target channel (alternative to positional)
-- `--no-skills` — skip copying `~/.pi/agent/skills/` to `<account>/shared/skills/`
-- `--background`, `--bg` — also fork current session into channel's tmux-sessions dir so `/chat-spawn-all` workers pick it up
-- `--force` — replace non-empty channel workspace (preserves pi-chat's `memory.md`, `skills/`, `incoming/`)
-
-## Two handoff modes
-
-### Foreground (default) — pi stays running
-
-```bash
-# At your laptop, in a pi-gondolin session against /home/bryan/code/foo:
-/chat-ez-handoff my_bot/dev
-# Mounted /home/bryan/code/foo → my_bot / dev
-#   workspace files: 87
-#   skills mounted: 14
-# Now run: /chat-connect my_bot/dev
-
-/chat-connect my_bot/dev
-```
-
-pi-chat attaches **your current pi session** to the channel. Conversation history is automatically present because it lives in your running pi process. The VM mounts the populated workspace at `/workspace`. Messages from Discord get answered by your foreground session.
-
-This works as long as pi stays open. Run pi inside tmux on a homelab and you can come back to it from anywhere via Tailscale.
-
-### Background (`--background`) — pi can close
-
-```bash
-/chat-ez-handoff my_bot/dev --background
-# Mounted ...
-#   session injected: ~/.pi/agent/chat/tmux-sessions/pi-chat-worker-my_bot_dev/<timestamp>_<uuid>.jsonl
-# Now run: /chat-spawn-all
-
-/chat-spawn-all
-```
-
-pi-chat's `/chat-spawn-all` starts a detached tmux session per channel, each running its own pi worker. Each worker calls `SessionManager.continueRecent(cwd, tmux-sessions-dir)` to find a session — `--background` forks your current session into that dir so the worker picks it up.
-
-After `/chat-spawn-all` you can close your foreground pi entirely. The workers keep running, your Discord channel is responsive, and the model has full prior context.
-
-## Picking a mode
-
-| | Foreground | Background |
-|--|--|--|
-| pi must stay running | yes | no |
-| conversation history carried | automatically | via session fork |
-| number of channels | 1 at a time | all configured |
-| use when | laptop nearby, occasional Discord | leaving the machine, true async work |
-
-## How it works
-
-The whole thing is ~250 lines. The interesting bit is what we *don't* do in foreground mode:
-
-- **We don't fork or copy session files.** pi-chat's `/chat-connect` attaches the channel to whichever session your pi process is running. Just put project files where pi-chat will mount them, and run `/chat-connect`.
-- **We don't manage Gondolin VMs.** pi-chat does that. `/chat-connect` calls `prepareGondolin` and `ConversationSandbox.start()` which mount `<channel>/workspace` at `/workspace` and `<account>/shared` at `/shared`.
-
-What we do in foreground:
-1. `cp -a <projectDir>/. <accountDir>/channels/<chanKey>/workspace/`
-2. `cp -a ~/.pi/agent/skills/. <accountDir>/shared/skills/`
-
-In `--background` we additionally:
-
-3. `SessionManager.forkFrom(currentSession, projectDir, <chat-home>/tmux-sessions/<sanitized-id>/)`
-
-so that pi-chat's `spawnConversationTmux` finds our forked file as the most-recent when it calls `continueRecent`.
-
-## Package and releases
-
-This repository is a git-installable pi package. The `package.json` `pi` manifest exposes `./index.ts` as the extension entrypoint; pi loads TypeScript directly, so there is no build artifact to publish.
-
-Releases use the same lightweight GitHub flow as the other `bry-guy/pi-ez-*` packages:
-
-- CI runs `mise run check` on pushes and PRs.
-- PR titles should be Conventional Commits (`feat:`, `fix:`, etc.).
-- release-please opens release PRs and creates semver GitHub releases/tags after merge.
-
-Repository settings still need to allow/prefer squash merges; the workflow files document the flow but do not change GitHub UI settings by themselves.
-
-## Limitations
-
-- **Skills are merged with overwrite-wins.** Host skills overlay any existing files in the account's `shared/skills/`. Use `--no-skills` if you've curated channel-specific skills there.
-- **Custom Gondolin images aren't propagated.** pi-chat hardcodes its image at `VM.create()` time. If your laptop session ran a custom image (e.g. with `mise`), the handoff VM won't have it. Workarounds: set `GONDOLIN_DEFAULT_IMAGE` globally, or record setup steps in `<project>/SYSTEM.md`.
-- **`--background` requires an assistant turn in the source session.** SessionManager only flushes appended entries to disk after the first assistant message. The forked file's pre-existing entries (from your source session) come along regardless because `forkFrom` writes them synchronously. The pi-chat binding entry that this extension appends won't persist if there's no assistant turn yet — but it doesn't need to, because pi-chat's `--chat-conversation` flag (always passed on background spawn) takes precedence over the in-session binding entry. So this is a latent quirk that doesn't affect behavior.
-- **Storage layout is replicated from pi-chat.** `src/chat-layout.ts` mirrors pi-chat's constants. Re-verify against pi-chat HEAD periodically.
+- `/chat-ez-handoff` slash command inside pi.
+- Copies your current project into the target pi-chat channel workspace.
+- Copies your local pi skills into the account shared skills directory.
+- Supports a foreground handoff to `/chat-connect`.
+- Supports a background handoff to `/chat-spawn-all` so you can close the local pi process.
+- Keeps pi-chat workspace files such as `memory.md`, `skills/`, and `incoming/` safe during forced replacement.
 
 ## Install
 
 ```bash
 pi install git:github.com/bry-guy/pi-ez-chat-handoff@v0.1.0
-# or track the default branch
-pi install git:github.com/bry-guy/pi-ez-chat-handoff
-# or load ephemerally
-pi -e git:github.com/bry-guy/pi-ez-chat-handoff
 ```
+
+Or track the default branch:
+
+```bash
+pi install git:github.com/bry-guy/pi-ez-chat-handoff
+```
+
+If pi is already running, run `/reload` after installing.
+
+## Before you start
+
+Configure `pi-chat` first:
+
+1. Install and configure `pi-chat`.
+2. Run `/chat-config`.
+3. Add your Discord or Telegram account.
+4. Configure at least one channel.
+
+This package does not replace pi-chat setup. It prepares a channel workspace and, optionally, a background worker session.
+
+## Quick start: keep this pi open
+
+From the local pi session you want to hand off:
+
+```text
+/chat-ez-handoff my_bot/dev
+```
+
+Then connect the same pi session to chat:
+
+```text
+/chat-connect my_bot/dev
+```
+
+Now messages in that Discord/Telegram channel talk to this running pi session. Your conversation history is still here because the local pi process is still the process answering.
+
+Use this mode when your laptop or tmux session will stay alive.
+
+## Background mode: close pi and continue from chat
+
+If you want the chat channel to keep working after this local pi exits:
+
+```text
+/chat-ez-handoff my_bot/dev --background
+/chat-spawn-all
+```
+
+Background mode also forks the current session into pi-chat's tmux worker session directory. `/chat-spawn-all` then starts a detached worker that resumes that fork.
+
+Use this mode when you want true async chat access from another device.
+
+## Pick a channel interactively
+
+If you omit the channel and pi has an interactive UI, the command prompts you:
+
+```text
+/chat-ez-handoff
+```
+
+In non-interactive contexts, pass the channel explicitly:
+
+```text
+/chat-ez-handoff account/channel
+```
+
+## Hand off a different project directory
+
+By default, the command copies pi's current working directory. To hand off a different directory:
+
+```text
+/chat-ez-handoff my_bot/dev --project=/path/to/project
+```
+
+Equivalent positional form:
+
+```text
+/chat-ez-handoff my_bot/dev /path/to/project
+```
+
+## Replace an existing channel workspace
+
+The command refuses to overwrite a non-empty workspace unless you pass `--force`:
+
+```text
+/chat-ez-handoff my_bot/dev --force
+```
+
+`--force` removes ordinary project files from the target workspace and recopies the project. It preserves pi-chat's own workspace artifacts:
+
+- `memory.md`
+- `skills/`
+- `incoming/`
+
+## Skip skill copying
+
+By default, local skills from `~/.pi/agent/skills/` are copied into the pi-chat account shared skills directory.
+
+Skip that if the account already has curated shared skills:
+
+```text
+/chat-ez-handoff my_bot/dev --no-skills
+```
+
+## Command reference
+
+```text
+/chat-ez-handoff [<account/channel>] [<project-dir>] [flags]
+```
+
+Flags:
+
+- `--project=<dir>` — project directory to copy; defaults to pi's current cwd.
+- `--channel=<account/channel>` — target channel; alternative to the positional channel.
+- `--no-skills` — do not copy `~/.pi/agent/skills/` into shared skills.
+- `--background`, `--bg` — fork the current session for pi-chat tmux workers.
+- `--force`, `-f` — replace non-empty workspace contents, preserving pi-chat artifacts.
+
+## Foreground versus background
+
+| Question | Foreground | Background |
+|---|---|---|
+| Can I close local pi? | No | Yes, after `/chat-spawn-all` |
+| Carries current conversation? | Yes, same process | Yes, forked session file |
+| Best for | quick handoff | durable remote worker |
+| Next command | `/chat-connect <channel>` | `/chat-spawn-all` |
+
+## How it works
+
+pi-chat mounts each channel workspace into a Gondolin VM at `/workspace` and account shared storage at `/shared`.
+
+This package prepares those directories:
+
+1. Copies the project into `~/.pi/agent/chat/accounts/<account>/channels/<channel>/workspace/`.
+2. Copies local skills into `~/.pi/agent/chat/accounts/<account>/shared/skills/` unless skipped.
+3. In background mode, forks the current pi session into `~/.pi/agent/chat/tmux-sessions/<worker>/` and records the pi-chat conversation id.
+
+No build step is required; pi loads the TypeScript extension directly.
+
+## Related package: persistent Discord threads
+
+If you want each Discord thread to become its own named, persistent pi session, use:
+
+```bash
+pi install git:github.com/bry-guy/pi-ez-chat-threads
+```
+
+`pi-ez-chat-handoff` is for moving a local session into a channel. `pi-ez-chat-threads` is for creating durable thread-specific sessions from an already-connected Discord channel.
 
 ## Development
 
 ```bash
 npm ci
-npm run check                 # typecheck + 23 tests
-npm pack --dry-run            # inspect publishable files
+npm run check          # typecheck + tests
+npm pack --dry-run     # inspect publishable files
 ```
 
 ## License
