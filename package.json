@@ -1,0 +1,51 @@
+{
+  "name": "pi-ez-chat-handoff",
+  "version": "0.1.0",
+  "description": "Hand off the current pi session to a pi-chat channel: mount project files and skills, then connect.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bry-guy/pi-ez-chat-handoff.git"
+  },
+  "homepage": "https://github.com/bry-guy/pi-ez-chat-handoff#readme",
+  "bugs": {
+    "url": "https://github.com/bry-guy/pi-ez-chat-handoff/issues"
+  },
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "pi-chat",
+    "gondolin",
+    "handoff"
+  ],
+  "license": "MIT",
+  "author": "bry-guy",
+  "files": [
+    "index.ts",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx test.ts",
+    "validate": "npm run typecheck && npm test",
+    "check": "npm run validate"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.75.4",
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
